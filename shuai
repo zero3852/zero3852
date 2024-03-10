@@ -1,0 +1,67 @@
+use std::error::Error;
+use std::io::{self, BufRead};
+use tokio::net::TcpStream;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    // Connect to the server
+    let mut stream = TcpStream::connect("127.0.0.1:8080").await?;
+
+    // Clone the stream for reading and writing
+    let (reader, mut writer) = (&stream, &stream);
+
+    // Spawn a task to handle incoming messages
+    tokio::spawn(async move {
+        let mut reader = io::BufReader::new(reader);
+        loop {
+            let mut buffer = String::new();
+            if let Ok(bytes_read) = reader.read_line(&mut buffer).await {
+                if bytes_read == 0 {
+                    // Connection closed
+                    break;
+                }
+                print!("{}", buffer);
+            } else {
+                // Error reading from the server
+                break;
+            }
+        }
+    });
+
+    // Handle user input and send it to the server
+    let stdin = io::stdin();
+    let mut lines = stdin.lock().lines();
+    while let Some(line) = lines.next_line().await? {
+        if line.starts_with('/') {
+            // Handle commands
+            handle_command(&mut writer, line.trim()).await?;
+        } else {
+            // Send regular message to the server
+            writer.write_all(line.as_bytes()).await?;
+            writer.write_all(b"\n").await?;
+            writer.flush().await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_command(writer: &mut (impl AsyncWriteExt + Unpin), command: &str) -> Result<(), Box<dyn Error>> {
+    match command {
+        "/quit" => {
+            writer.write_all(b"/quit\n").await?;
+            writer.flush().await?;
+            println!("You have quit the chat.");
+        }
+        "/help" => {
+            println!("Available commands:");
+            println!("/quit - Quit the chat");
+            println!("/help - Display available commands");
+        }
+        _ => {
+            println!("Invalid command. Type /help for available commands.");
+        }
+    }
+    Ok(())
+}
